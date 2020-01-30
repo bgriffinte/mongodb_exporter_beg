@@ -29,8 +29,8 @@ import (
 
 	pmmVersion "github.com/percona/pmm/version"
 
-	"github.com/percona/mongodb_exporter/collector"
-	"github.com/percona/mongodb_exporter/shared"
+	"github.com/bgriffinte/mongodb_exporter_beg/collector"
+	"github.com/bgriffinte/mongodb_exporter_beg/shared"
 )
 
 const (
@@ -82,7 +82,7 @@ func main() {
 
 	programCollector := version.NewCollector(program)
 	mongodbCollector := collector.NewMongodbCollector(&collector.MongodbCollectorOpts{
-		URI:                      *uriF,
+		URI: *uriF,
 		CollectDatabaseMetrics:   *collectDatabaseF,
 		CollectCollectionMetrics: *collectCollectionF,
 		CollectTopMetrics:        *collectTopF,

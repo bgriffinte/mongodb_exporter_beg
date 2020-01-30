@@ -22,7 +22,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	commoncollector "github.com/percona/mongodb_exporter/collector/common"
+	commoncollector "github.com/bgriffinte/mongodb_exporter_beg/collector/common"
 )
 
 // ServerStatus keeps the data returned by the serverStatus() method.
