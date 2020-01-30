@@ -53,6 +53,12 @@ var (
 		Name:      "mongos_last_ping_timestamp",
 		Help:      "The unix timestamp of the last Mongos ping to the Cluster config servers",
 	}, []string{"name"})
+	mongosShardChunks = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Subsystem: "sharding",
+		Name:      "namespace_shard_chunks",
+		Help:      "The count of chunks per shard per collection",
+	}, []string{"name"})
 	mongosBalancerLockTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: Namespace,
 		Subsystem: "sharding",
@@ -75,6 +81,19 @@ type MongosInfo struct {
 	MongoVersion string    `bson:"mongoVersion"`
 }
 
+type NamespaceNames struct {
+	Name         string    `bson:"_id"`
+}
+
+type ShardNames struct {
+	Name         string    `bson:"_id"`
+}
+
+type ChunksInfo struct {
+	Name         string    `bson:"ns_shard"`
+	Chunks       int64     `bson:"chunk_count"`
+}
+
 type MongosBalancerLock struct {
 	State   float64   `bson:"state"`
 	Process string    `bson:"process"`
@@ -90,6 +109,66 @@ type ShardingStats struct {
 	Topology        *ShardingTopoStats
 	BalancerLock    *MongosBalancerLock
 	Mongos          *[]MongosInfo
+	ShardChunks     *[]ChunksInfo
+}
+
+// GetShardChunks counts up chunks per collection per shard
+func GetShardChunks(client *mongo.Client) *[]ChunksInfo {
+	chunksInfo := []ChunksInfo{}
+	namespaceNames := []NamespaceNames{}
+	shardNames := []ShardNames{}
+
+	// only need the _id in the results
+	idOnlyOpt := options.Find().SetProjection(bson.D{{"_id", 1}})
+	cs, err := client.Database("config").Collection("shards").Find(context.TODO(), bson.D{}, idOnlyOpt)
+	if err != nil {
+		log.Errorf("Failed to execute find query on 'config.shards': %s.", err)
+		return nil
+	}
+	defer cs.Close(context.TODO())
+
+	for cs.Next(context.TODO()) {
+		i := &ShardNames{}
+		if err := cs.Decode(i); err != nil {
+			log.Error(err)
+			continue
+		}
+		shardNames = append(shardNames, *i)
+	}
+
+	// don't want to collect stats on the dropped tables (why are they even
+	// there?)
+	cc, err := client.Database("config").Collection("collections").Find(context.TODO(), bson.D{{"dropped", false}}, idOnlyOpt)
+	if err != nil {
+		log.Errorf("Failed to execute find query on 'config.collections': %s.", err)
+		return nil
+	}
+	defer cc.Close(context.TODO())
+
+	for cc.Next(context.TODO()) {
+		i := &NamespaceNames{}
+		if err := cc.Decode(i); err != nil {
+			log.Error(err)
+			continue
+		}
+		namespaceNames = append(namespaceNames, *i)
+	}
+
+	for _, namespace := range namespaceNames {
+		for _, shard := range shardNames {
+			i := &ChunksInfo{}
+
+			count, err := client.Database("config").Collection("chunks").CountDocuments(context.TODO(), bson.M{"ns": namespace.Name, "shard": shard.Name });
+			if err != nil {
+				log.Errorf("Failed to execute document count on 'config.chunks': %s.", err)
+				return nil
+			}
+			i.Name = namespace.Name + "_" + shard.Name
+			i.Chunks = count
+			chunksInfo = append(chunksInfo, *i)
+		}
+	}
+	return &chunksInfo
 }
 
 // GetMongosInfo gets mongos info.
@@ -208,6 +287,15 @@ func (status *ShardingStats) Export(ch chan<- prometheus.Metric) {
 	mongosPing.Collect(ch)
 	mongosBalancerLockState.Collect(ch)
 	mongosBalancerLockTimestamp.Collect(ch)
+
+	if status.ShardChunks != nil {
+		for _, chunkInfo := range *status.ShardChunks {
+			// ...WithLabelValues().Set() only accepts float64 even though an
+			// integer type is a better fit
+			mongosShardChunks.WithLabelValues(chunkInfo.Name).Set(float64(chunkInfo.Chunks))
+		}
+	}
+	mongosShardChunks.Collect(ch)
 }
 
 func (status *ShardingStats) Describe(ch chan<- *prometheus.Desc) {
@@ -223,6 +311,7 @@ func (status *ShardingStats) Describe(ch chan<- *prometheus.Desc) {
 	mongosPing.Describe(ch)
 	mongosBalancerLockState.Describe(ch)
 	mongosBalancerLockTimestamp.Describe(ch)
+	mongosShardChunks.Describe(ch)
 }
 
 // GetShardingStatus gets sharding status.
@@ -235,6 +324,7 @@ func GetShardingStatus(client *mongo.Client) *ShardingStats {
 	results.Topology = GetShardingTopoStatus(client)
 	results.Mongos = GetMongosInfo(client)
 	results.BalancerLock = GetMongosBalancerLock(client)
+	results.ShardChunks = GetShardChunks(client)
 
 	return results
 }
