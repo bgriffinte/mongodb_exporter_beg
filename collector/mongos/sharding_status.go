@@ -118,7 +118,7 @@ type ShardingStats struct {
 func GetShardChunks(client *mongo.Client) *[]ChunksInfo {
 	chunksInfo := []ChunksInfo{}
 
-	matching := bson.M{"dropped": false}
+	matching := bson.M{}
 	grouping := bson.M{"_id": bson.M{
 				"ns": "$ns",
 				"shard": "$shard",
