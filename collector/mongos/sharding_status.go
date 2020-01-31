@@ -81,17 +81,19 @@ type MongosInfo struct {
 	MongoVersion string    `bson:"mongoVersion"`
 }
 
-type NamespaceNames struct {
-	Name         string    `bson:"_id"`
+type AggegateId struct {
+	Namespace    string    `bson:"ns"`
+	Shard        string    `bson:"shard"`
 }
 
-type ShardNames struct {
-	Name         string    `bson:"_id"`
+type AggregateOut struct {
+	Inner        AggegateId `bson:"_id"`
+	Count        int64      `bson:"count"`
 }
 
 type ChunksInfo struct {
-	Name         string    `bson:"ns_shard"`
-	Chunks       int64     `bson:"chunk_count"`
+	Name         string
+	Chunks       int64
 }
 
 type MongosBalancerLock struct {
@@ -115,59 +117,34 @@ type ShardingStats struct {
 // GetShardChunks counts up chunks per collection per shard
 func GetShardChunks(client *mongo.Client) *[]ChunksInfo {
 	chunksInfo := []ChunksInfo{}
-	namespaceNames := []NamespaceNames{}
-	shardNames := []ShardNames{}
 
-	// only need the _id in the results
-	idOnlyOpt := options.Find().SetProjection(bson.D{{"_id", 1}})
-	cs, err := client.Database("config").Collection("shards").Find(context.TODO(), bson.D{}, idOnlyOpt)
+	matching := bson.M{"dropped": false}
+	grouping := bson.M{"_id": bson.M{
+				"ns": "$ns",
+				"shard": "$shard",
+			},
+			"count": bson.M{"$sum": 1},
+		    }
+
+	c, err := client.Database("config").Collection("chunks").Aggregate(context.TODO(), []bson.M{{"$match": matching}, {"$group": grouping}})
 	if err != nil {
-		log.Errorf("Failed to execute find query on 'config.shards': %s.", err)
+		log.Errorf("Failed to execute aggregate on 'config.chunks': %s.", err)
 		return nil
 	}
-	defer cs.Close(context.TODO())
+	defer c.Close(context.TODO())
 
-	for cs.Next(context.TODO()) {
-		i := &ShardNames{}
-		if err := cs.Decode(i); err != nil {
+	for c.Next(context.TODO()) {
+		i := &ChunksInfo{}
+		a := &AggregateOut{}
+		if err := c.Decode(a); err != nil {
 			log.Error(err)
 			continue
 		}
-		shardNames = append(shardNames, *i)
+		i.Name = a.Inner.Namespace + "_" + a.Inner.Shard
+		i.Chunks = a.Count
+		chunksInfo = append(chunksInfo, *i)
 	}
 
-	// don't want to collect stats on the dropped tables (why are they even
-	// there?)
-	cc, err := client.Database("config").Collection("collections").Find(context.TODO(), bson.D{{"dropped", false}}, idOnlyOpt)
-	if err != nil {
-		log.Errorf("Failed to execute find query on 'config.collections': %s.", err)
-		return nil
-	}
-	defer cc.Close(context.TODO())
-
-	for cc.Next(context.TODO()) {
-		i := &NamespaceNames{}
-		if err := cc.Decode(i); err != nil {
-			log.Error(err)
-			continue
-		}
-		namespaceNames = append(namespaceNames, *i)
-	}
-
-	for _, namespace := range namespaceNames {
-		for _, shard := range shardNames {
-			i := &ChunksInfo{}
-
-			count, err := client.Database("config").Collection("chunks").CountDocuments(context.TODO(), bson.M{"ns": namespace.Name, "shard": shard.Name });
-			if err != nil {
-				log.Errorf("Failed to execute document count on 'config.chunks': %s.", err)
-				return nil
-			}
-			i.Name = namespace.Name + "_" + shard.Name
-			i.Chunks = count
-			chunksInfo = append(chunksInfo, *i)
-		}
-	}
 	return &chunksInfo
 }
 
