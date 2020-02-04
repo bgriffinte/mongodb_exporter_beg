@@ -53,12 +53,6 @@ var (
 		Name:      "mongos_last_ping_timestamp",
 		Help:      "The unix timestamp of the last Mongos ping to the Cluster config servers",
 	}, []string{"name"})
-	mongosShardChunks = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: Namespace,
-		Subsystem: "sharding",
-		Name:      "namespace_shard_chunks",
-		Help:      "The count of chunks per shard per collection",
-	}, []string{"name"})
 	mongosBalancerLockTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: Namespace,
 		Subsystem: "sharding",
@@ -81,21 +75,6 @@ type MongosInfo struct {
 	MongoVersion string    `bson:"mongoVersion"`
 }
 
-type AggegateId struct {
-	Namespace    string    `bson:"ns"`
-	Shard        string    `bson:"shard"`
-}
-
-type AggregateOut struct {
-	Inner        AggegateId `bson:"_id"`
-	Count        int64      `bson:"count"`
-}
-
-type ChunksInfo struct {
-	Name         string
-	Chunks       int64
-}
-
 type MongosBalancerLock struct {
 	State   float64   `bson:"state"`
 	Process string    `bson:"process"`
@@ -111,41 +90,6 @@ type ShardingStats struct {
 	Topology        *ShardingTopoStats
 	BalancerLock    *MongosBalancerLock
 	Mongos          *[]MongosInfo
-	ShardChunks     *[]ChunksInfo
-}
-
-// GetShardChunks counts up chunks per collection per shard
-func GetShardChunks(client *mongo.Client) *[]ChunksInfo {
-	chunksInfo := []ChunksInfo{}
-
-	matching := bson.M{}
-	grouping := bson.M{"_id": bson.M{
-				"ns": "$ns",
-				"shard": "$shard",
-			},
-			"count": bson.M{"$sum": 1},
-		    }
-
-	c, err := client.Database("config").Collection("chunks").Aggregate(context.TODO(), []bson.M{{"$match": matching}, {"$group": grouping}})
-	if err != nil {
-		log.Errorf("Failed to execute aggregate on 'config.chunks': %s.", err)
-		return nil
-	}
-	defer c.Close(context.TODO())
-
-	for c.Next(context.TODO()) {
-		i := &ChunksInfo{}
-		a := &AggregateOut{}
-		if err := c.Decode(a); err != nil {
-			log.Error(err)
-			continue
-		}
-		i.Name = a.Inner.Namespace + "_" + a.Inner.Shard
-		i.Chunks = a.Count
-		chunksInfo = append(chunksInfo, *i)
-	}
-
-	return &chunksInfo
 }
 
 // GetMongosInfo gets mongos info.
@@ -265,14 +209,6 @@ func (status *ShardingStats) Export(ch chan<- prometheus.Metric) {
 	mongosBalancerLockState.Collect(ch)
 	mongosBalancerLockTimestamp.Collect(ch)
 
-	if status.ShardChunks != nil {
-		for _, chunkInfo := range *status.ShardChunks {
-			// ...WithLabelValues().Set() only accepts float64 even though an
-			// integer type is a better fit
-			mongosShardChunks.WithLabelValues(chunkInfo.Name).Set(float64(chunkInfo.Chunks))
-		}
-	}
-	mongosShardChunks.Collect(ch)
 }
 
 func (status *ShardingStats) Describe(ch chan<- *prometheus.Desc) {
@@ -288,7 +224,6 @@ func (status *ShardingStats) Describe(ch chan<- *prometheus.Desc) {
 	mongosPing.Describe(ch)
 	mongosBalancerLockState.Describe(ch)
 	mongosBalancerLockTimestamp.Describe(ch)
-	mongosShardChunks.Describe(ch)
 }
 
 // GetShardingStatus gets sharding status.
@@ -301,7 +236,6 @@ func GetShardingStatus(client *mongo.Client) *ShardingStats {
 	results.Topology = GetShardingTopoStatus(client)
 	results.Mongos = GetMongosInfo(client)
 	results.BalancerLock = GetMongosBalancerLock(client)
-	results.ShardChunks = GetShardChunks(client)
 
 	return results
 }
