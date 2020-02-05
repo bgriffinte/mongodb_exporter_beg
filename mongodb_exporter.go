@@ -47,7 +47,7 @@ var (
 	collectTopF                  = kingpin.Flag("collect.topmetrics", "Enable collection of table top metrics").Bool()
 	collectIndexUsageF           = kingpin.Flag("collect.indexusage", "Enable collection of per index usage stats").Bool()
 	mongodbCollectConnPoolStatsF = kingpin.Flag("collect.connpoolstats", "Collect MongoDB connpoolstats").Bool()
-	collectChunksF               = kingpin.Flag("collect.chunkcounts", "Enable counting of chunks per shard (possibly slow)").Bool()
+	collectChunksF               = kingpin.Flag("collect.chunkstats", "Enable counting of chunks per shard per collection (slow when counts are high)").Bool()
 
 	uriF = kingpin.Flag("mongodb.uri", "MongoDB URI, format").
 		PlaceHolder("[mongodb://][user:pass@]host1[:port1][,host2[:port2],...][/database][?options]").
