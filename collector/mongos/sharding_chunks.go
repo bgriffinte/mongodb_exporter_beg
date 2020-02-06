@@ -17,7 +17,7 @@ var (
 		Subsystem: "sharding",
 		Name:      "namespace_shard_chunks",
 		Help:      "The count of chunks per shard per collection",
-	}, []string{"name"})
+	}, []string{"namespace","shard"})
 )
 
 type AggegateId struct {
@@ -31,8 +31,9 @@ type AggregateOut struct {
 }
 
 type ChunksInfo struct {
-	Name   string
-	Chunks int64
+	Namespace string
+	Shard     string
+	Chunks    int64
 }
 
 type ShardingCounts struct {
@@ -65,7 +66,8 @@ func GetShardChunks(client *mongo.Client) *[]ChunksInfo {
 			log.Error(err)
 			continue
 		}
-		i.Name = a.Inner.Namespace + "_" + a.Inner.Shard
+		i.Namespace = a.Inner.Namespace
+		i.Shard = a.Inner.Shard
 		i.Chunks = a.Count
 		chunksInfo = append(chunksInfo, *i)
 	}
@@ -78,7 +80,7 @@ func (status *ShardingCounts) Export(ch chan<- prometheus.Metric) {
 		for _, chunkInfo := range *status.ShardChunks {
 			// ...WithLabelValues().Set() only accepts float64 even though an
 			// integer type is a better fit
-			mongosShardChunks.WithLabelValues(chunkInfo.Name).Set(float64(chunkInfo.Chunks))
+			mongosShardChunks.WithLabelValues(chunkInfo.Namespace,chunkInfo.Shard).Set(float64(chunkInfo.Chunks))
 		}
 	}
 	mongosShardChunks.Collect(ch)
