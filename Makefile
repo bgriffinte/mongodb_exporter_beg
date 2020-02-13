@@ -21,6 +21,12 @@ BIN_DIR             ?= $(PREFIX)/bin
 DOCKER_IMAGE_NAME   ?= mongodb-exporter
 DOCKER_IMAGE_TAG    ?= $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
 
+# ThousandEyes package builder, set MAKE_DEB in env to override location.
+# Default path is relative to packaging/ subdirectory.
+MAKE_DEB            ?= ../../te-packager/make_deb.sh
+# Parameter for MAKE_DEB
+DISTRO              ?= bionic
+
 # Race detector is only supported on amd64.
 RACE := $(shell test $$(go env GOARCH) != "amd64" || (echo "-race"))
 
@@ -63,6 +69,10 @@ vet:
 
 # It's just alias to build binary
 build: release
+
+te-deb: release
+	mv -f bin/mongodb_exporter bin/percona-mongodb-exporter
+	(cd packaging && $(MAKE_DEB) $(DISTRO))
 
 snapshot: $(GOPATH)/bin/goreleaser
 	@echo ">> building snapshot"
@@ -109,6 +119,7 @@ clean:
 	@echo ">> removing build artifacts"
 	@rm -f $(PREFIX)/coverage.txt
 	@rm -Rf $(PREFIX)/bin
+	@rm -f $(PREFIX)/packaging/*.deb
 	@echo ">> downing docker test environment if docker-compose is available"
 	@if docker-compose --version 2>/dev/null >/dev/null ; then docker-compose down ; fi
 
@@ -130,4 +141,4 @@ mongo-db-in-docker:
 gen-ssl-certs:
 	./scripts/ssl.sh
 
-.PHONY: init all style format build release test vet release docker clean check-vendor-synced mongo-db-in-docker gen-ssl-certs
+.PHONY: init all style format build release test vet release docker clean check-vendor-synced mongo-db-in-docker gen-ssl-certs te-deb
